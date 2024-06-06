@@ -1,8 +1,10 @@
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using Azure.Storage.Blobs;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Tables;
 using Microsoft.Extensions.Logging;
@@ -18,31 +20,34 @@ public static class GetEmailsViaGraph
     private static readonly string tenantId = Environment.GetEnvironmentVariable("TenantId");
     private static readonly Uri graphQueryUri = new Uri(Environment.GetEnvironmentVariable("GraphQueryUri"));
     private static readonly string Scopes = Environment.GetEnvironmentVariable("Scopes");
+    private static readonly BlobServiceClient blobClient = new BlobServiceClient(Environment.GetEnvironmentVariable("AzureWebJobsStorage"));
 
     [FunctionName("GetEmailsViaGraph")]
     [return: Table("graphresults")]
-    public static async Task<GraphResult> Run([TimerTrigger("%CronExpression%")] TimerInfo myTimer, ILogger log)
+    public static async Task<GraphResult> Run([TimerTrigger("%CronExpression%")] TimerInfo myTimer, ILogger log,
+        IBinder binder)
     {
         log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
-        
+
         var app = ConfidentialClientApplicationBuilder.Create(clientId)
             .WithClientSecret(clientSecret)
             .WithAuthority(new Uri($"https://login.microsoftonline.com/{tenantId}"))
             .Build();
-        
+
         var scopes = Scopes.Split(',');
 
         var result = await app.AcquireTokenForClient(scopes).ExecuteAsync();
 
         var statusCode = string.Empty;
         var responseBody = string.Empty;
+        HttpResponseMessage response = null;
 
         try
         {
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {result.AccessToken}");
 
-            var response = await httpClient.GetAsync(graphQueryUri);
+            response = await httpClient.GetAsync(graphQueryUri);
             statusCode = Convert.ToString((int)response.StatusCode);
             responseBody = await response.Content.ReadAsStringAsync();
         }
@@ -58,8 +63,19 @@ public static class GetEmailsViaGraph
             responseBody = $"Exception encountered while calling Graph API: {ex}";
             log.LogError(ex, responseBody);
         }
+        finally
+        {
+            if (response != null)
+            {
+                var output = await SerializeGraphResults.Serialize(response);
+                var blobFileName = output.isValid ? $"graphresponses/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}.json" : $"graphresponses/invalid/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}.json";
+                await using var writer = binder.Bind<Stream>(new BlobAttribute(blobFileName, FileAccess.Write));
+                await output.payload.CopyToAsync(writer);
+                await writer.FlushAsync();
+            }
+        }
 
-        string hashString = string.Empty;
+        var hashString = string.Empty;
         using (var md5 = MD5.Create())
         {
             var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(responseBody));
