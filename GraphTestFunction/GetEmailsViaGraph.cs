@@ -24,7 +24,7 @@ public static class GetEmailsViaGraph
 
     [FunctionName("GetEmailsViaGraph")]
     [return: Table("graphresults")]
-    public static async Task<GraphResult> Run([TimerTrigger("%CronExpression%")] TimerInfo myTimer, ILogger log,
+    public static async Task<GraphResult> Run([TimerTrigger("%CronExpression%", RunOnStartup = false)] TimerInfo myTimer, ILogger log,
         IBinder binder)
     {
         log.LogInformation($"C# Timer trigger function executed at: {DateTime.Now}");
