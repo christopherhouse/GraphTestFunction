@@ -67,11 +67,16 @@ public static class GetEmailsViaGraph
         {
             if (response != null)
             {
+
+
                 var output = await SerializeGraphResults.Serialize(response);
-                var blobFileName = output.isValid ? $"graphresponses/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}.json" : $"graphresponses/invalid/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}.json";
-                await using var writer = binder.Bind<Stream>(new BlobAttribute(blobFileName, FileAccess.Write));
-                await output.payload.CopyToAsync(writer);
-                await writer.FlushAsync();
+
+                await OutputStreams(output, binder);
+
+                //var blobFileName = output.isValid ? $"graphresponses/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}.json" : $"graphresponses/invalid/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}.json";
+                //await using var writer = binder.Bind<Stream>(new BlobAttribute(blobFileName, FileAccess.Write));
+                //await output.payload.CopyToAsync(writer);
+                //await writer.FlushAsync();
             }
         }
 
@@ -91,6 +96,20 @@ public static class GetEmailsViaGraph
         };
         
         return requestResult;
+    }
+
+    private static async Task OutputStreams((Stream payload, Stream headers, bool isValid) input, IBinder binder)
+    {
+        var payloadFileName = input.isValid ? $"graphresponses/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}-payload.json" : $"graphresponses/invalid/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}-payload.json";
+        var headerFileName = input.isValid ? $"graphresponses/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}-headers.json" : $"graphresponses/invalid/{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}-headers.json";
+
+        await using var writer = binder.Bind<Stream>(new BlobAttribute(payloadFileName, FileAccess.Write));
+        await input.payload.CopyToAsync(writer);
+        await writer.FlushAsync();
+
+        await using var headerWriter = binder.Bind<Stream>(new BlobAttribute(headerFileName, FileAccess.Write));
+        await input.headers.CopyToAsync(headerWriter);
+        await headerWriter.FlushAsync();
     }
 }
 
