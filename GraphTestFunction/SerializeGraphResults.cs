@@ -10,9 +10,10 @@ namespace GraphTestFunction;
 
 public class SerializeGraphResults
 {
-    public static async Task<(Stream payload, bool isValid)> Serialize(HttpResponseMessage response)
+    public static async Task<(Stream payload, Stream headers, bool isValid)> Serialize(HttpResponseMessage response)
     {
-        var serializedStream = new MemoryStream();
+        var bodyStream = new MemoryStream();
+        var headerStream = new MemoryStream();
         var isValid = false;
 
         var builder = new StringBuilder();
@@ -24,8 +25,17 @@ public class SerializeGraphResults
         }
 
         builder.AppendLine();
-        builder.AppendLine(responseJson);
-        var outputBytes = Encoding.UTF8.GetBytes(builder.ToString());
+
+        var headerBytes = Encoding.UTF8.GetBytes(builder.ToString());
+        var bodyBytes = Encoding.UTF8.GetBytes(responseJson);
+
+        await headerStream.WriteAsync(headerBytes, 0, headerBytes.Length);
+        await headerStream.FlushAsync();
+        headerStream.Position = 0;
+
+        await bodyStream.WriteAsync(bodyBytes, 0, bodyBytes.Length);
+        await bodyStream.FlushAsync();
+        bodyStream.Position = 0;
 
         try
         {
@@ -38,10 +48,8 @@ public class SerializeGraphResults
             Console.WriteLine(e);
         }
         
-        await serializedStream.WriteAsync(outputBytes, 0, outputBytes.Length);
-        await serializedStream.FlushAsync();
-        serializedStream.Position = 0;
+
         
-        return (serializedStream, isValid);
+        return (bodyStream, headerStream, isValid);
     }
 }
