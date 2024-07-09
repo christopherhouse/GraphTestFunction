@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Net.Http;
+using System.Net.Http.Formatting;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -20,7 +21,8 @@ public class GraphEmailClient
     private static readonly Uri graphQueryUri = new Uri(Environment.GetEnvironmentVariable("GraphQueryUri"));
     private static readonly string Scopes = Environment.GetEnvironmentVariable("Scopes");
 
-    private static HttpClient httpClient = new HttpClient();
+    private static readonly HttpClient httpClient = new HttpClient();
+    private static readonly JsonMediaTypeFormatter jsonFormatter = new JsonMediaTypeFormatter();
 
     public static async Task FetchEmailsAsync(IBinder binder, ILogger logger)
     {
@@ -53,7 +55,7 @@ public class GraphEmailClient
         {
             if (response != null)
             {
-                var output = await SerializeResponse(response);
+                var output = await SerializeResponse(response, logger);
                 await OutputStreams(output, binder, startTime, statusCode);
                 await StoreHash(binder, responseBody, output.isValid, startTime, statusCode);
             }
@@ -112,7 +114,7 @@ public class GraphEmailClient
         return result.AccessToken;
     }
 
-    public static async Task<(Stream payload, Stream headers, bool isValid)> SerializeResponse(HttpResponseMessage response)
+    public static async Task<(Stream payload, Stream headers, bool isValid)> SerializeResponse(HttpResponseMessage response, ILogger logger)
     {
         var bodyStream = new MemoryStream();
         var headerStream = new MemoryStream();
@@ -141,17 +143,30 @@ public class GraphEmailClient
 
         try
         {
-            JObject.Parse(responseJson);
+            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+            var body = await reader.ReadToEndAsync();
+
+            using var validationStream = new MemoryStream();
+            await using var writer = new StreamWriter(validationStream);
+            await writer.WriteAsync(body);
+            await writer.FlushAsync();
+            validationStream.Position = 0;
+
+            await jsonFormatter.ReadFromStreamAsync(typeof(JObject), validationStream, null, null);
 
             isValid = true;
         }
-        catch (JsonReaderException e)
+        catch (Exception e)
         {
+            logger.LogError(e, "error parsing response json, deserialization failed");
             Console.WriteLine(e);
         }
-
-
+        finally
+        {
+            bodyStream.Position = 0;
+        }
 
         return (bodyStream, headerStream, isValid);
     }
+    
 }
